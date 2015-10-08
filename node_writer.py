@@ -1,3 +1,5 @@
+### just a template, not to be run alone
+
 import bpy
 #obj = bpy.context.scene.objects.active
 #node_tree = '+ntree_path+'
