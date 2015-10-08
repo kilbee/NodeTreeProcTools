@@ -1,6 +1,6 @@
 bl_info = {
-    "name": "kbCopy Node Tree",
-    "description": "Cloud Generator for Cycles",
+    "name": "kb Nodetree Proc Tools",
+    "description": "Processing and Recreating Node Tree",
     "author": "kilbeeu",
     "version": (0, 1),
     "blender": (2, 76, 0),
@@ -31,8 +31,10 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
     def backup_node_tree(self, obj):
         node_tree = bpy.data.objects[obj.name].material_slots[0].material.node_tree
         nodes = node_tree.nodes
-        ntree_path = 'bpy.data.objects[obj.name].material_slots[0].material.node_tree'
+        ntree_path = 'bpy.data.objects[obj.name].material_slots[0].material.node_tree'  # hardcoded for testing purposes - todo: rework later for any node tree
         text_name = obj.name + " material[0] node tree backup"
+        
+        # creating script file - when run, it will recreate node tree
         bpy.data.texts.new(text_name)
         text = bpy.data.texts[text_name]
         text.clear()
@@ -40,31 +42,27 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         text.write('obj = bpy.context.scene.objects.active\n')
         text.write('node_tree = '+ntree_path+'\n')
         text.write('nodes = node_tree.nodes\n\n')
-
         text.write("def config_node(node_tree, name, node_type, posx, posy, prop = None, prop_default = None):\n")
         text.write("\tnode = node_tree.nodes.new(type=node_type)  # create puff node\n")
         text.write("\tnode.location = (posx, posy)\n")
         text.write("\tnode.name = name\n")
         text.write("\tnode.label = name\n")
         text.write("\treturn node\n\n")
-
         text.write("def create_node_group(node_tree, name, node_type, posx, posy):\n")
         text.write("\tgroup_data = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
         text.write("\tnode = config_node(node_tree, name, 'ShaderNodeGroup', posx, posy)\n")        
         text.write("\tnode.node_tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
         text.write("\treturn node\n\n")
-
         text.write("def add_group_output(node_tree, group_node_output, input_type, input_name):\n")
         text.write("\tif input_type is not 'NodeSocketVirtual':\n")
         #text.write("\t\tnode = node_tree.nodes[group_node_output]\n")
         text.write("\t\tnode_tree.outputs.new(input_type, input_name)\n\n")
-
         text.write("def add_group_input(node_tree, group_node_input, output_type, output_name):\n")
         text.write("\tif output_type is not 'NodeSocketVirtual':\n")
         #text.write("\t\tnode = node_tree.nodes[group_node_output]\n")
         text.write("\t\tnode_tree.inputs.new(output_type, output_name)\n\n")       
 
-        self.process_node_tree(node_tree, text, ntree_path)
+        self.process_node_tree(node_tree, text, ntree_path) # start processing node tree
         
 
     def process_node_tree(self, node_tree, text_object, nt_path):        
@@ -106,7 +104,7 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                     text_object.write("add_group_output(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
 
             for node_input in node.inputs:
-                # need this check - shader inputs dont have default_value properties
+                # need this check - shader inputs dont have default_value properties:
                 if hasattr(node_input, 'default_value'):
                     #str(node_input.default_value)
                     #val = node_input.path_from_id()[-2:-1]
@@ -211,7 +209,9 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-    bpy.app.debug = True
+
+    # debugging:
+    bpy.app.debug = False
     debug_txt = "\n\n\n--------------------------------------------------------------------------------------\n----------------------------------------------------------------- run@  "+str(time.localtime().tm_hour) +":"+ str(time.localtime().tm_min) +":"+ str(time.localtime().tm_sec) +" -----\n"
     print(debug_txt)
     
