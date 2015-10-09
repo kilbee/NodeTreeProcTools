@@ -1,30 +1,35 @@
 ### just a template, not to be run alone
 
-text.write("import bpy\n")
-text.write('obj = bpy.context.scene.objects.active\n')
-text.write('node_tree = '+ntree_path+'\n')
-text.write('nodes = node_tree.nodes\n\n')
-text.write("def config_node(node_tree, name, node_type, posx, posy, operation = None, prop = None, prop_default = None):\n")
-text.write("\tnode = node_tree.nodes.new(type=node_type)  # create puff node\n")
-text.write("\tnode.location = (posx, posy)\n")
-text.write("\tnode.name = name\n")
-text.write("\tnode.label = name\n")
-text.write("\tif operation is not None:\n")
-text.write("\t\tnode.operation = operation\n")
-text.write("\treturn node\n\n")
-text.write("def create_node_group(node_tree, name, node_type, posx, posy):\n")
-text.write("\tgroup_data = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
-text.write("\tnode = config_node(node_tree, name, 'ShaderNodeGroup', posx, posy)\n")        
-text.write("\tnode.node_tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
-text.write("\treturn node\n\n")
-text.write("def add_group_output(node_tree, group_node_output, input_type, input_name):\n")
-text.write("\tif input_type is not 'NodeSocketVirtual':\n")
-#text.write("\t\tnode = node_tree.nodes[group_node_output]\n")
-text.write("\t\tnode_tree.outputs.new(input_type, input_name)\n\n")
-text.write("def add_group_input(node_tree, group_node_input, output_type, output_name):\n")
-text.write("\tif output_type is not 'NodeSocketVirtual':\n")
-#text.write("\t\tnode = node_tree.nodes[group_node_output]\n")
-text.write("\t\tnode_tree.inputs.new(output_type, output_name)\n\n")
-text.write("def config_node_inputs(node_tree, node_name, input_socket, input_value):\n")
-text.write("\tnode = node_tree.nodes[node_name]\n")
-text.write("\tnode.inputs[input_socket].default_value = input_value\n\n")
+import bpy
+obj = bpy.context.scene.objects.active
+node_tree = '+ntree_path+'
+nodes = node_tree.nodes
+
+def create_node(node_tree, name, node_type, posx, posy, operation = None, prop = None, prop_default = None):
+    node = node_tree.nodes.new(type=node_type)  # create puff node\n")
+    node.location = (posx, posy)
+    node.name = name
+    node.label = name
+    if operation is not None:
+        node.operation = operation
+        return node
+
+def create_node_group(node_tree, name, node_type, posx, posy):
+    group_data = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    node = create_node(node_tree, name, 'ShaderNodeGroup', posx, posy)
+    node.node_tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    return node
+
+def add_group_output(node_tree, group_node_output, input_type, input_name):
+    if input_type is not 'NodeSocketVirtual':
+        #node = node_tree.nodes[group_node_output]
+        node_tree.outputs.new(input_type, input_name)
+
+def add_group_input(node_tree, group_node_input, output_type, output_name):
+    if output_type is not 'NodeSocketVirtual':
+        #node = node_tree.nodes[group_node_output]
+        node_tree.inputs.new(output_type, output_name)
+
+def config_node_inputs(node_tree, node_name, input_socket, input_value):
+    node = node_tree.nodes[node_name]
+    node.inputs[input_socket].default_value = input_value
