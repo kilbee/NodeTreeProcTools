@@ -42,11 +42,13 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         text.write('obj = bpy.context.scene.objects.active\n')
         text.write('node_tree = '+ntree_path+'\n')
         text.write('nodes = node_tree.nodes\n\n')
-        text.write("def config_node(node_tree, name, node_type, posx, posy, prop = None, prop_default = None):\n")
+        text.write("def config_node(node_tree, name, node_type, posx, posy, operation = None, prop = None, prop_default = None):\n")
         text.write("\tnode = node_tree.nodes.new(type=node_type)  # create puff node\n")
         text.write("\tnode.location = (posx, posy)\n")
         text.write("\tnode.name = name\n")
         text.write("\tnode.label = name\n")
+        text.write("\tif operation is not None:\n")
+        text.write("\t\tnode.operation = operation\n")
         text.write("\treturn node\n\n")
         text.write("def create_node_group(node_tree, name, node_type, posx, posy):\n")
         text.write("\tgroup_data = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
@@ -60,7 +62,11 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         text.write("def add_group_input(node_tree, group_node_input, output_type, output_name):\n")
         text.write("\tif output_type is not 'NodeSocketVirtual':\n")
         #text.write("\t\tnode = node_tree.nodes[group_node_output]\n")
-        text.write("\t\tnode_tree.inputs.new(output_type, output_name)\n\n")       
+        text.write("\t\tnode_tree.inputs.new(output_type, output_name)\n\n")
+        text.write("def config_node_inputs(node_tree, node_name, input_socket, input_value):\n")
+        text.write("\tnode = node_tree.nodes[node_name]\n")
+        text.write("\tnode.inputs[input_socket].default_value = input_value\n\n")
+
 
         self.process_node_tree(node_tree, text, ntree_path) # start processing node tree
         
@@ -78,7 +84,11 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                 text_object.write("create_node_group(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
                 self.process_node_tree(node.node_tree, text_object, group_ntree_path)   # call self to iterate through node group node_tree
             else:
-                text_object.write("config_node(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
+                if node.type == 'MATH':
+                    operation = node.operation
+                    text_object.write("config_node(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+", '"+str(node.operation)+"')\n")
+                else:
+                    text_object.write("config_node(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
 
             if node.type == 'GROUP_INPUT':
                 #self.report({'INFO'}, "Group Input Node - "+ node.name)
@@ -103,37 +113,29 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                     node_name = node_input.name
                     text_object.write("add_group_output(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
 
-            for node_input in node.inputs:
-                # need this check - shader inputs dont have default_value properties:
-                if hasattr(node_input, 'default_value'):
-                    #str(node_input.default_value)
-                    #val = node_input.path_from_id()[-2:-1]
-                    val = node_input.default_value
-                    val_type = type(val)
-                    if str(val_type) == "<class 'float'>":
-                        self.report({'INFO'}, "Node ["+node.name+"] input ["+node_input.name+"] (float) = "+ str(val))
-                    elif str(val_type) == "<class 'bpy_prop_array'>":
-                        self.report({'INFO'}, "Node ["+node.name+"] input ["+node_input.name+"] (array) = ")
-                        for value in val:
-                            self.report({'INFO'}, "["+str(value)+"]")
-                    else:
-                        self.report({'INFO'}, "Node ["+node.name+"] input ["+node_input.name+"] = "+ str(val_type))
-            
-            for node_output in node.outputs:
-                # need this check - shader inputs dont have default_value properties
-                if hasattr(node_output, 'default_value'):
-                    #str(node_output.default_value)
-                    #val = node_output.path_from_id()[-2:-1]
-                    val = node_output.default_value
-                    val_type = type(val)
-                    if str(val_type) == "<class 'float'>":
-                        self.report({'INFO'}, "Node ["+node.name+"] output ["+node_output.name+"] (float) = "+ str(val))
-                    elif str(val_type) == "<class 'bpy_prop_array'>":
-                        self.report({'INFO'}, "Node ["+node.name+"] output ["+node_output.name+"] (array) = ")
-                        for value in val:
-                            self.report({'INFO'}, "["+str(value)+"]")
-                    else:
-                        self.report({'INFO'}, "Node ["+node.name+"] output ["+node_output.name+"] = "+ str(val_type))
+            for input_num, node_input in enumerate(node.inputs):
+                
+                if node.type != 'REROUTE' and node.type != 'OUTPUT_MATERIAL':
+                    # need this check - shader inputs dont have default_value properties:
+                    #self.report({'INFO'}, "Node ["+node.name+"] type: "+node_input.type)
+                    if hasattr(node_input, 'default_value'):
+                        #input_num = node_input.path_from_id()[-2:-1]
+                        if node_input.type == 'VALUE':
+                            input_value = node_input.default_value
+                            text_object.write('node_tree = '+nt_path+'\n')
+                            text_object.write("config_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+str(input_value)+")\n")
+                        elif node_input.type == 'RGBA' or  node_input.type == 'VECTOR':
+                            print(node_input.default_value)
+                            #f1 = node_input.default_value[0]
+                            input_array = []
+                            
+                            for f in enumerate(node_input.default_value):
+                                input_array.append(f[1])
+                            
+                            text_object.write('node_tree = '+nt_path+'\n')
+                            text_object.write("config_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+str(input_array)+")\n")
+
+
                 
         text_object.write('\n# Links:\n')
         text_object.write('node_tree = '+nt_path+'\n')
