@@ -13,6 +13,7 @@ bl_info = {
 import bpy
 from mathutils import Vector
 import time
+import os, sys
 
 class CopyNodeTreeToTextPy(bpy.types.Operator):
     'Copy Node Tree'
@@ -38,49 +39,14 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         bpy.data.texts.new(text_name)
         text = bpy.data.texts[text_name]
         text.clear()
-        text.write("import bpy\n")
-        text.write('obj = bpy.context.scene.objects.active\n')
-        text.write('node_tree = '+ntree_path+'\n')
-        text.write('nodes = node_tree.nodes\n\n')
-        text.write("def create_node(node_tree, node_num, name, node_type, posx, posy, operation = None, blend_type = None, prop = None, prop_default = None):\n")
-        text.write("\tnode = node_tree.nodes.new(type=node_type)  # create puff node\n")
-        text.write("\tnode.location = (posx, posy)\n")
-        text.write("\tnode.name = name\n")
-        text.write("\tnode.label = name\n")
-        text.write("\tif operation is not None:\n")
-        text.write("\t\tnode.operation = operation\n")
-        text.write("\tif blend_type is not None:\n")
-        text.write("\t\tnode.blend_type = blend_type\n")
-        text.write("\treturn node\n\n")
-
-        text.write("def config_node(node_tree, node_num, is_muted, is_hidden, dim_x, dim_y):\n")
-        text.write("\tnode = node_tree.nodes[node_num]\n")
-        text.write("\tnode.mute = is_muted\n")
-        text.write("\tnode.hide = is_hidden\n")
-        text.write("\ttry:\n")
-        text.write("\t\tnode.width = dim_x\n")
-        text.write("\t\tnode.height = dim_y\n")
-        text.write("\texcept:\n")
-        text.write("\t\tpass\n\n")
-
-        text.write("def create_node_group(node_tree, node_num, name, node_type, posx, posy):\n")
-        text.write("\tgroup_data = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
-        text.write("\tnode = create_node(node_tree, node_num, name, 'ShaderNodeGroup', posx, posy)\n")        
-        text.write("\tnode.node_tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')\n")
-        text.write("\treturn node\n\n")
-
-        text.write("def add_group_output(node_tree, group_node_output, input_type, input_name):\n")
-        text.write("\tif input_type is not 'NodeSocketVirtual':\n")
-        text.write("\t\tnode_tree.outputs.new(input_type, input_name)\n\n")
-
-        text.write("def add_group_input(node_tree, group_node_input, output_type, output_name):\n")
-        text.write("\tif output_type is not 'NodeSocketVirtual':\n")
-        text.write("\t\tnode_tree.inputs.new(output_type, output_name)\n\n")
-
-        text.write("def xonfig_node_inputs(node_tree, node_name, input_socket, input_value):\n")
-        text.write("\tnode = node_tree.nodes[node_name]\n")
-        text.write("\tnode.inputs[input_socket].default_value = input_value\n\n")
-
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        template = open(os.path.join(script_dir, "node_writer.py"),"r")
+        template_string = template.read()
+        template.close()
+        text.write(template_string)
+        text.write('obj = bpy.context.scene.objects.active\n\n')
+        #text.write('node_tree = '+ntree_path+'\n')
+        #text.write('nodes = node_tree.nodes\n\n')
 
         self.process_node_tree(node_tree, text, ntree_path) # start processing node tree
         
@@ -100,8 +66,9 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                 #self.report({'INFO'}, "Group: "+ node.name)
                 group_ntree_path = nt_path +".nodes['"+node.name+"'].node_tree"
                 #create_node_group(node_tree, name, node_type, posx, posy):
-                text_object.write("create_node_group(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
+                text_object.write("group_data_name = create_node_group(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
                 text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
+
                 self.process_node_tree(node.node_tree, text_object, group_ntree_path)   # call self to iterate through node group node_tree
             else:
                 if node.type == 'MATH':
@@ -116,14 +83,44 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                     text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
 
             if node.type == 'GROUP_INPUT':
+                
                 for node_output in node.outputs:
-                    #print("inputs["+node_input.path_from_id()[-2:-1]+"]")
-                    #inputs[0].bl_idname
-                    #add_group_output(node_out, node_out.inputs[0].bl_idname, node_out.inputs[0].name)
-                    node_num = node_output.path_from_id()[-2:-1]
                     node_type = node_output.bl_idname
                     node_name = node_output.name
-                    text_object.write("add_group_input(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
+                    text_object.write("data_path = add_group_input(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
+                    
+                inputs = node_tree.id_data.inputs
+                for num, group_input in enumerate(inputs):
+                    # note: 'VECTOR' type input default value is an array, but min and max values are floats - bug?
+                    if hasattr(group_input, 'default_value'):
+                        if group_input.type == 'VALUE':
+                            default_value = str(group_input.default_value)
+                        else:
+                            default_value = str(self.create_array(group_input.default_value))
+                    else:
+                        default_value = 'None'
+
+                    if hasattr(group_input, 'min_value'):
+                        if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
+                            min_value = str(group_input.min_value)
+                        else:
+                            min_value = str(self.create_array(group_input.min_value))
+                    else:
+                        min_value = 'None'
+
+                    if hasattr(group_input, 'max_value'):
+                        if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
+                            max_value = str(group_input.max_value)
+                        else:
+                            max_value = str(self.create_array(group_input.max_value))
+                    else:
+                        max_value = 'None'
+
+                    #data_path = "bpy.data.node_groups['"+node_tree.id_data.name+"']"
+                    d_path = "bpy.data.node_groups[data_path]"                    
+                    text_object.write('group_node = '+d_path+'\n')
+                    text_object.write("config_group_node_input(group_node, "+str(num)+", "+default_value+", "+min_value+", "+max_value+")\n")
+
             if node.type == 'GROUP_OUTPUT':
                 #self.report({'INFO'}, "Group Output Node - "+ node.name)
                 #text_object.write("create_node(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
@@ -147,17 +144,14 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
                         else:
                             input_value = str(self.create_array(node_input.default_value))
                         text_object.write('node_tree = '+nt_path+'\n')
-                        text_object.write("xonfig_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+input_value+")\n")
+                        text_object.write("config_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+input_value+")\n")
 
     
                 
         text_object.write('\n# Links:\n')
         text_object.write('node_tree = '+nt_path+'\n')
         for link in node_tree.links:
-            # self.report({'INFO'}, link.from_node.name)
-            # self.report({'INFO'}, link.from_socket.name)
-            # self.report({'INFO'}, link.to_node.name)
-            # self.report({'INFO'}, link.to_socket.name)
+            # link.from_node.name, link.from_socket.name, link.to_node.name, link.to_socket.node_name   # reference
             node_from = nt_path +".nodes['"+ str(node_tree.nodes[link.from_node.name].name)+"']"
             nd_link_from = node_from + ".outputs["+str(link.from_socket.path_from_id()[-2:-1])+"]"
             node_to = nt_path +".nodes['"+ str(node_tree.nodes[link.to_node.name].name)+"']"
@@ -171,6 +165,7 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         for f in enumerate(input_array):
             output_array.append(f[1])
         return output_array
+
 
  
 
@@ -218,12 +213,7 @@ class CopyNodeTreeToTextPyPanel(bpy.types.Panel):
 def register():
     # settings classes
     bpy.utils.register_class(CopyNodeTreeToTextPy)
-    
- 
     bpy.utils.register_module(__name__)
-
-
-
 
 def unregister():
     bpy.utils.unregister_class(CopyNodeTreeToTextPy)
