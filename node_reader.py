@@ -2,7 +2,7 @@ bl_info = {
     "name": "kb Nodetree Proc Tools",
     "description": "Processing and Recreating Node Tree",
     "author": "kilbeeu",
-    "version": (0, 1),
+    "version": (0, 2),
     "blender": (2, 76, 0),
     "location": "Node Editor Toolbar",
     "warning": "",
@@ -21,21 +21,49 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
     bl_label = 'Copy Node Tree'
     operation = bpy.props.StringProperty()
 
+
     def invoke(self, context, event):
         obj = bpy.context.scene.objects.active
        
         if self.operation == 'BACKUP':
-            # backup active material node tree
-            self.backup_node_tree(obj)
+            node_groups = self.read_node_tree(obj)  # backup active material node tree
+            self.write_node_tree(obj, node_groups)  # generate script for recreating node tree
         return {'FINISHED'}
 
-    def backup_node_tree(self, obj):
+
+    def read_node_tree(self, obj):
         node_tree = bpy.data.objects[obj.name].material_slots[0].material.node_tree
-        nodes = node_tree.nodes
-        ntree_path = 'bpy.data.objects[obj.name].material_slots[0].material.node_tree'  # hardcoded for testing purposes - todo: rework later for any node tree
-        text_name = obj.name + " material[0] node tree backup"
-        
-        # creating script file - when run, it will recreate node tree
+        nt_path = 'bpy.data.objects[obj.name].material_slots[0].material.node_tree'  # hardcoded for testing purposes - todo: rework later for any node tree
+        group_list = []
+        mat_group = ["Material NodeTree", nt_path, node_tree] # highest level group - material node tree
+        group_list.append(mat_group)    # append to node group list
+        node_groups = self.read_node_groups(node_tree, nt_path, group_list) # append all node groups in node tree
+        return node_groups
+               
+
+    def read_node_groups(self, node_tree, nt_path, group_list):        
+        for node in node_tree.nodes:
+            if node.type == 'GROUP':
+                node_path_from_id = str(node.path_from_id())
+                group_ntree_id_data = node.node_tree.id_data.name
+                group_nt = node.node_tree
+                group_nt_path = nt_path + "." + node_path_from_id + ".node_tree" # construct node group data path
+
+                duplicate_group = False
+                for group in group_list:
+                    for item in group:
+                        if group_nt.name == item:
+                            duplicate_group = True # check if current node group is not yet listed
+                            
+                if duplicate_group == False:
+                    current_group = [group_nt.name, group_nt_path, group_nt]
+                    group_list.append(current_group)    # if node group is not yet listed, then append to node group list
+                    group_list_deeper = self.read_node_groups(group_nt, group_nt_path, group_list) # if there is a node group in current node group, then call self to append to node group list
+        return group_list
+
+
+    def write_node_tree(self, obj, node_groups):
+        text_name = obj.name + " mat[0] Node Tree"
         bpy.data.texts.new(text_name)
         text = bpy.data.texts[text_name]
         text.clear()
@@ -45,120 +73,144 @@ class CopyNodeTreeToTextPy(bpy.types.Operator):
         template.close()
         text.write(template_string)
         text.write('obj = bpy.context.scene.objects.active\n\n')
-        #text.write('node_tree = '+ntree_path+'\n')
-        #text.write('nodes = node_tree.nodes\n\n')
-
-        self.process_node_tree(node_tree, text, ntree_path) # start processing node tree
         
+        # Generating nodes and node groups with inputs and outputs
+        for node_group in node_groups:
+            # node_group[0] = data block
+            # node_group[1] = str( node_tree path)
+            # node_group[2] = node_tree path
+            
+            node_tree_str = node_group[1]
+            text.write('\n# Node Tree of ['+ str(node_group[0]) +']\n')
+            text.write("node_tree = " + node_tree_str + "\n")            
+            
+            node_tree = node_group[2]
+            for node_num, node in enumerate(node_tree.nodes):
+                node_num = str(node_num)
+                loc_x = str(node.location.x)
+                loc_y = str(node.location.y)
+                dim_x = str(node.width)
+                dim_y = str(node.height)
+                is_muted = str(node.mute)
+                is_hidden = str(node.hide)
 
-    def process_node_tree(self, node_tree, text_object, nt_path):        
-        nodes = node_tree.nodes
-        
-        for node_num, node in enumerate(nodes):
-            text_object.write('\n# Node ['+ node.name +'] of ['+ node_tree.name+']\n')
-            text_object.write('node_tree = '+nt_path+'\n')
-            node_num = str(node_num)
-            is_muted = str(node.mute)
-            is_hidden = str(node.hide)
-            dim_x = str(node.width)
-            dim_y = str(node.height)
-            if node.type == 'GROUP':
-                #self.report({'INFO'}, "Group: "+ node.name)
-                group_ntree_path = nt_path +".nodes['"+node.name+"'].node_tree"
-                #create_node_group(node_tree, name, node_type, posx, posy):
-                text_object.write("group_data_name = create_node_group(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
-                text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
+                node_color = 'None'
+                if node.use_custom_color is True:
+                    node_color = str(self.create_array(node.color))
 
-                self.process_node_tree(node.node_tree, text_object, group_ntree_path)   # call self to iterate through node group node_tree
-            else:
+                operation = 'None'
                 if node.type == 'MATH':
-                    operation = node.operation
-                    text_object.write("create_node(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+", '"+str(node.operation)+"')\n")
-                    text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
-                elif node.type == 'MIX_RGB':
-                    text_object.write("create_node(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+", None,'"+str(node.blend_type)+"')\n")
-                    text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
-                else:
-                    text_object.write("create_node(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
-                    text_object.write("config_node(node_tree, "+node_num+", "+is_muted+", "+is_hidden+", "+dim_x+", "+dim_y+")\n")
-
-            if node.type == 'GROUP_INPUT':
+                    operation = "'"+str(node.operation)+"'"
                 
-                for node_output in node.outputs:
-                    node_type = node_output.bl_idname
-                    node_name = node_output.name
-                    text_object.write("data_path = add_group_input(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
+                blend_type = 'None'
+                if node.type == 'MIX_RGB':
+                    blend_type = "'"+str(node.blend_type)+"'"
+                
+                # create node (node_tree, node_number, node_name, node_type, operation_type=None, blend_type=None)
+                text.write("node = create_node(node_tree, "+node_num+", '"+node.name+"', '"+str(node.bl_idname)+"', "+operation+", "+blend_type+")\n")
+                # config node (node_tree, node_number, location_x, location_y, dimension_x, dimension_y, is_muted, is_hidden, custom_color=None)
+                text.write("config_node(node_tree, "+node_num+", "+loc_x+", "+loc_y+", "+dim_x+", "+dim_y+", "+is_muted+", "+is_hidden+", "+node_color+")\n")                
+
+                # special check for group node
+                if node.type == 'GROUP':
+                    data_block = node.node_tree.name
+                    text.write("group_data_name = create_node_group('"+data_block+"')\n")
+                    text.write("node.node_tree = group_data_name\n")
+
+                # special check for group input node
+                if node.type == 'GROUP_INPUT':                
+                    for node_output in node.outputs:
+                        node_type = node_output.bl_idname
+                        node_name = node_output.name
+                        text.write("add_group_input(node_tree, '"+node_type+"', '"+node_name+"')\n")
                     
-                inputs = node_tree.id_data.inputs
-                for num, group_input in enumerate(inputs):
-                    # note: 'VECTOR' type input default value is an array, but min and max values are floats - bug?
-                    if hasattr(group_input, 'default_value'):
-                        if group_input.type == 'VALUE':
-                            default_value = str(group_input.default_value)
+                    # configure group inputs
+                    inputs = node_tree.id_data.inputs
+                    for num, group_input in enumerate(inputs):
+                        # check if input has default value
+                        if hasattr(group_input, 'default_value'):
+                            if group_input.type == 'VALUE':
+                                default_value = str(group_input.default_value)
+                            else:
+                                default_value = str(self.create_array(group_input.default_value))
                         else:
-                            default_value = str(self.create_array(group_input.default_value))
-                    else:
-                        default_value = 'None'
+                            default_value = 'None'
 
-                    if hasattr(group_input, 'min_value'):
-                        if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
-                            min_value = str(group_input.min_value)
+                        # check if input has min value
+                        if hasattr(group_input, 'min_value'):
+                            if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
+                                min_value = str(group_input.min_value)
+                            else:
+                                min_value = str(self.create_array(group_input.min_value))
                         else:
-                            min_value = str(self.create_array(group_input.min_value))
-                    else:
-                        min_value = 'None'
+                            min_value = 'None'
 
-                    if hasattr(group_input, 'max_value'):
-                        if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
-                            max_value = str(group_input.max_value)
+                        # check if input has max value
+                        if hasattr(group_input, 'max_value'):
+                            if group_input.type == 'VALUE' or group_input.type == 'VECTOR':
+                                max_value = str(group_input.max_value)
+                            else:
+                                max_value = str(self.create_array(group_input.max_value))
                         else:
-                            max_value = str(self.create_array(group_input.max_value))
-                    else:
-                        max_value = 'None'
+                            max_value = 'None'
+                        # note: 'VECTOR' type input default value is an array, but min and max values are floats - bug?
+                        text.write("config_group_node_input(node_tree, "+str(num)+", "+default_value+", "+min_value+", "+max_value+")\n")
 
-                    #data_path = "bpy.data.node_groups['"+node_tree.id_data.name+"']"
-                    d_path = "bpy.data.node_groups[data_path]"                    
-                    text_object.write('group_node = '+d_path+'\n')
-                    text_object.write("config_group_node_input(group_node, "+str(num)+", "+default_value+", "+min_value+", "+max_value+")\n")
+                # configure group outputs
+                if node.type == 'GROUP_OUTPUT':
+                    for node_input in node.inputs:
+                        node_type = node_input.bl_idname
+                        node_name = node_input.name
+                        text.write("add_group_output(node_tree, '"+node_type+"', '"+node_name+"')\n")
 
-            if node.type == 'GROUP_OUTPUT':
-                #self.report({'INFO'}, "Group Output Node - "+ node.name)
-                #text_object.write("create_node(node_tree, '"+node.name+"', '"+str(node.bl_idname)+"', "+str(node.location.x)+", "+str(node.location.y)+")\n")
-                for node_input in node.inputs:
-                    #print("inputs["+node_input.path_from_id()[-2:-1]+"]")
-                    #inputs[0].bl_idname
-                    #add_group_output(node_out, node_out.inputs[0].bl_idname, node_out.inputs[0].name)
-                    node_num = node_input.path_from_id()[-2:-1]
-                    node_type = node_input.bl_idname
-                    node_name = node_input.name
-                    text_object.write("add_group_output(node_tree, '"+node.name+"', '"+node_type+"', '"+node_name+"')\n")
+        # configure node inputs
+        text.write('\n# Node inputs defaults\n')
+        for node_group in node_groups:            
+            node_tree_str = node_group[1]
+            text.write('\n# Inputs for nodes of Node Tree ['+ str(node_group[0]) +']\n')
+            text.write("node_tree = " + node_tree_str + "\n")            
+            node_tree = node_group[2]
+            for node_num, node in enumerate(node_tree.nodes):
+                for input_num, node_input in enumerate(node.inputs):                
+                    if node.type != 'REROUTE' and node.type != 'OUTPUT_MATERIAL':
+                        if hasattr(node_input, 'default_value'):    # need this check - shader inputs dont have default_value properties:
+                            if node_input.type == 'VALUE':
+                                input_value = str(node_input.default_value)
+                            else:   # replaced: elif node_input.type == 'RGBA' or  node_input.type == 'VECTOR':
+                                input_value = str(self.create_array(node_input.default_value))
+                            text.write("config_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+input_value+")\n")
 
-            for input_num, node_input in enumerate(node.inputs):
+
+        # Generating links for node groups
+        text.write('\n# Links\n')
+        for node_group in node_groups:            
+            node_tree_str = node_group[1]
+            text.write('\n# Links for Node Tree of ['+ str(node_group[0]) +']\n')
+            text.write("node_tree = " + node_tree_str + "\n")            
+            node_tree = node_group[2]
+            for link in node_tree.links:
+                #print(link.from_node.name)
+                node_from = "node_tree.nodes['"+ link.from_node.name+"']"
+                try:
+                    ls, rs = str(link.from_socket.path_from_id()[-3:-1]).split('[') # parse number out of strin
+                except:
+                    rs = str(link.from_socket.path_from_id()[-3:-1])
+                link_from = node_from + ".outputs["+rs+"]"
+
+                node_to = "node_tree.nodes['"+ link.to_node.name+"']"
+                try:
+                    ls, rs = str(link.to_socket.path_from_id()[-3:-1]).split("[")  # parse number out of strin
+                except:
+                    rs = str(link.to_socket.path_from_id()[-3:-1])
+                link_to = node_to + ".inputs["+rs+"]"
+                #output_socket = link.path_resolve('from_socket')
+                #input_socket = link.path_resolve('to_socket')
+                text.write("node_tree.links.new("+link_from+", "+link_to+")")   # write link to file
+                text.write('\n')
+
+
                 
-                if node.type != 'REROUTE' and node.type != 'OUTPUT_MATERIAL':
-                    # need this check - shader inputs dont have default_value properties:
-                    if hasattr(node_input, 'default_value'):
-                        if node_input.type == 'VALUE':
-                            input_value = str(node_input.default_value)
-                        #elif node_input.type == 'RGBA' or  node_input.type == 'VECTOR':
-                        else:
-                            input_value = str(self.create_array(node_input.default_value))
-                        text_object.write('node_tree = '+nt_path+'\n')
-                        text_object.write("config_node_inputs(node_tree, '"+node.name+"', "+str(input_num)+", "+input_value+")\n")
-
-    
-                
-        text_object.write('\n# Links:\n')
-        text_object.write('node_tree = '+nt_path+'\n')
-        for link in node_tree.links:
-            # link.from_node.name, link.from_socket.name, link.to_node.name, link.to_socket.node_name   # reference
-            node_from = nt_path +".nodes['"+ str(node_tree.nodes[link.from_node.name].name)+"']"
-            nd_link_from = node_from + ".outputs["+str(link.from_socket.path_from_id()[-2:-1])+"]"
-            node_to = nt_path +".nodes['"+ str(node_tree.nodes[link.to_node.name].name)+"']"
-            nd_link_to = node_to + ".inputs["+str(link.to_socket.path_from_id()[-2:-1])+"]"
-
-            text_object.write("node_tree.links.new("+nd_link_from+", "+nd_link_to+")")
-            text_object.write('\n')
+            
 
     def create_array(self, input_array):
         output_array = []
